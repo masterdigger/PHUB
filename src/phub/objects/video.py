@@ -52,6 +52,8 @@ class Video:
         # cached property ones.
         self.loaded_keys = list(self.__dict__.keys()) + ['loaded_keys']
         
+        self.ALLOW_QUERY_SIMULATION = False
+        
         logger.debug('Initialised new video object %s', self)
     
     def __repr__(self) -> str:
@@ -83,8 +85,10 @@ class Video:
         '''
         Lazily fetch some data.
         
-        data@key => Use webmasters
-        page@key => Use web scrapers
+        key format:
+            data@<dkey>   => Get key from API 
+            page@<pkey>   => Scrape key from page
+            <dkey>|<pkey> => Choose considering cache
         
         Args:
             key (str): The key to fetch.
@@ -94,6 +98,15 @@ class Video:
         
         '''
         
+        # Multiple keys handle
+        if '|' in key:
+            datakey, pagekey = key.split('|')
+            
+            if self.page:
+                key = 'page@' + pagekey
+            key = 'data@' + datakey
+        
+        # If key is already cached 
         if key in self.data:
             return self.data.get(key)
         
@@ -235,24 +248,74 @@ class Video:
         
         return path
     
+    def get_direct_url(self, quality: Quality) -> str:
+        '''
+        Get the direct video URL given a specific quality.
+        
+        Args:
+            quality (Quality): The video quality.
+        
+        Returns:
+            str: The direct url.
+        '''
+        
+        from ..locals import Quality
+        qual = Quality(quality)
+        
+        # Get remote    
+        sources = self.fetch('page@mediaDefinitions')
+        remote = [s for s in sources if 'remote' in s][0]['videoUrl']
+
+        # Parse quality
+        quals = {int(s['quality']): s['videoUrl']
+                 for s in self.client.call(remote).json()}
+        
+        return qual.select(quals)
+    
     # === Interaction methods === #
     
     def _assert_internal_success(self, res: dict) -> None:
         '''
         Assert an internal response has succeeded.
+
+        Args:
+            res (dict): The rerquest json response. 
         '''
         
-        if res['success'] and not res['success'] in ('true', True, 1):
-            raise Exception(f'Failed to call : `{res.get("message")}`')
+        if 'success' in res and not res['success']:
+            raise Exception(f'Call failed: `{res.get("message")}`')
     
     @cached_property
     def _as_query(self) -> dict[str, str]:
         '''
         Simulate a query to gain access to more data.
+        If the video object is yielded by a query, this property
+        will be overriden by the query data.
         
-        Warning - This will make a lot of requests and can false
+        Warning - This will make a lot of requests and can fake
                    some properties (like watched).
         '''
+        
+        # Now i really don't want people to use this without knowing what it
+        # really does 
+        if not self.ALLOW_QUERY_SIMULATION:
+            
+            # Personnalised error for the JSONQuery
+            from . import queries
+            parent = self.data.get('query@parent')
+            
+            if isinstance(parent, queries.JSONQuery): raise Exception(
+                'Data is not available while using the hubtraffic wrapper. '
+                'Please set use_hubtraffic=False in query initialisation.'
+            )
+            
+            raise Exception(
+                'Query simulation is disabled for this video object. '
+                'If you still want to continue, set video.ALLOW_QUERY_SIMULATION=True. '
+                'Be advised this method is not recomended and requires user logging.'
+            )
+        
+        logger.warning('Attempting query simulation')
         
         # 1. Create playlist
         name = f'temp-{random.randint(0, 100)}'
@@ -262,7 +325,7 @@ class Video:
             tags = '["porn"]',
             description = '',
             status = 'private',
-            token = self._token
+            token = self.client._granted_token
         )).json()
         
         self._assert_internal_success(res)
@@ -272,7 +335,7 @@ class Video:
         res = self.client.call('playlist/video_add', 'POST', dict(
             pid = playlist_id,
             vid = self.id,
-            token = self._token
+            token = self.client._granted_token
         ))
         
         self._assert_internal_success(res.json())
@@ -298,6 +361,7 @@ class Video:
     def like(self, toggle: bool = True) -> None:
         '''
         Set the video like value.
+        
         Args:
             toggle (bool): The toggle value.
         '''
@@ -306,12 +370,13 @@ class Video:
             id = self.id,
             current = self.likes.up,
             value = int(toggle),
-            token = self._token
+            token = self.client._granted_token
         ))
     
     def favorite(self, toggle: bool = True) -> None:
         '''
         Set video as favorite or not.
+        
         Args:
             toggle (bool): The toggle value.
         '''
@@ -319,7 +384,7 @@ class Video:
         res = self.client.call('video/favourite', 'POST', dict(
             toggle = int(toggle),
             id = self.id,
-            token = self._token
+            token = self.client._granted_token
         ))
         
         self._assert_internal_success(res.json())
@@ -327,31 +392,21 @@ class Video:
     def watch_later(self, toggle: bool = True) -> None:
         '''
         Add or remove the video to the watch later playlist.
+        
         Args:
             toggle (bool): The toggle value.
         '''
         
         mod = 'add' if toggle else 'remove'
         
-        res = self.client.call(f'playlist/video_{mod}_watchlater', 'POST',
-                               dict(vid = self.id, token = self._token))
+        res = self.client.call(f'playlist/video_{mod}_watchlater', 'POST', dict(
+            vid = self.id,
+            token = self.client._granted_token
+        ))
         
         self._assert_internal_success(res.json())
     
     # === Data properties === #
-
-    @cached_property
-    def _token(self) -> str:
-        '''
-        The page client token.
-        '''
-        
-        assert self.client.logged, 'Account is not logged in'
-        
-        # Force fetch page
-        self.fetch('page@title')
-        
-        return consts.re.get_token(self.page)
 
     @cached_property
     def id(self) -> str:
@@ -361,6 +416,9 @@ class Video:
 
         if id_ := self.data.get('page@id'):
             return id_
+        
+        if pt := self.data.get('page@playbackTracking'):
+            return pt.get('video_id')
         
         # Use thumbnail URL 
         return consts.re.get_thumb_id(self.image.url)
@@ -380,9 +438,16 @@ class Video:
         The video thumbnail.
         '''
         
+        if url := self.data.get('page@image_url'):
+            servers = None
+        
+        else:
+            url = self.fetch('data@thumb')
+            servers = self.fetch('data@thumbs')
+        
         return Image(client = self.client,
-                     url = self.fetch('data@thumb'),
-                     servers = self.fetch('data@thumbs'),
+                     url = url,
+                     servers = servers,
                      name = f'thumb-{self.key}')
     
     @cached_property
@@ -399,12 +464,14 @@ class Video:
         The video length.
         '''
         
-        params = ('seconds', 'minutes', 'hours', 'days')
+        if seconds := self.data.get('page@video_duration'):
+            delta = {'seconds': seconds}
         
-        # Parse date
-        raw = self.fetch('data@duration')
-        digits = list(map(int, raw.split(':')))[::-1]
-        delta = {k: v for k, v in zip(params, digits)}
+        else:
+            params = ('seconds', 'minutes', 'hours', 'days')
+            raw = self.fetch('data@duration')
+            digits = list(map(int, raw.split(':')))[::-1]
+            delta = {k: v for k, v in zip(params, digits)}
         
         return timedelta(**delta)
     
@@ -414,6 +481,7 @@ class Video:
         The video tags.
         '''
         
+        # TODO - Can be harvested on page
         return [Tag(tag['tag_name'])
                 for tag in self.fetch('data@tags')]
     
@@ -423,6 +491,7 @@ class Video:
         Positive and negative reviews of the video.
         '''
         
+        # TODO - Can be harvested on page
         rating = self.fetch('data@rating') / 100
         counter = self.fetch('data@ratings')
         
@@ -436,6 +505,7 @@ class Video:
         How many people watched the video.
         '''
         
+        # TODO - Can be harvested on page
         return self.fetch('data@views')
     
     @cached_property
@@ -454,13 +524,14 @@ class Video:
         
         raw = self.fetch('data@publish_date')
         return datetime.strptime(raw, '%Y-%m-%d %H:%M:%S')
-        
+
     @cached_property
     def pornstars(self) -> list[User]:
         '''
         The pornstars present in the video.
         '''
         
+        # TODO - Can be harvested on page and cache more data
         return [User.get(self.client, ps['pornstar_name'])
                 for ps in self.fetch('data@pornstars')]
     
@@ -504,34 +575,6 @@ class Video:
         return User.from_video(self)
 
     @cached_property
-    def liked(self) -> NotImplemented:
-        '''
-        Whether the video was liked by the account.
-        '''
-        
-        return NotImplemented
-    
-    @cached_property
-    def watched(self) -> bool:
-        '''
-        Whether the video was viewed previously by the account.
-        '''
-        
-        if not self.client.logged:
-            raise Exception('Client must be logged in to use this property.') # temp class
-        
-        # If we fetched the video page while logged in, PH consider we have watched it
-        if self.page:
-            return True
-        
-        if 'watchedVideo' in self._as_query['markers']:
-            return True
-        
-        # For some reason the watched text is different in playlists
-        if 'class="watchedVideoText' in self._as_query['raw']:
-            return True
-    
-    @cached_property
     def is_free_premium(self) -> bool | NotImplemented:
         '''
         Whether the video is part of free premium.
@@ -549,15 +592,68 @@ class Video:
         return Image(client = self.client,
                      url = self._as_query['preview'],
                      name = f'preview-{self.key}')
+    
+    @cached_property
+    def is_HD(self) -> bool:
+        '''
+        Whether the video is in High Definition.
+        '''
         
+        return self.fetch('page@isHD') == 'true'
+    
+    @cached_property
+    def is_VR(self) -> bool:
+        '''
+        Whether the video is in Virtual Reality.
+        '''
+        
+        return self.fetch('page@isVR') == 'true'
+    
+    @cached_property
+    def embed(self) -> str:
+        '''
+        The video iframe embed.
+        '''
+        
+        return self.data.get('page@embedCode') or f'{consts.HOST}/embed/{self.id}'
+    
+    # === Dynamic data properties === #
+    
+    @property
+    def liked(self) -> NotImplemented:
+        '''
+        Whether the video was liked by the account.
+        '''
+        
+        return NotImplemented
+    
+    @property
+    def watched(self) -> bool:
+        '''
+        Whether the video was viewed previously by the account.
+        '''
+        
+        assert self.client.logged, 'Client must be logged in to use this property'
+        
+        # If we fetched the video page while logged in, PH consider we have watched it
+        if self.page:
+            return True
+        
+        if 'watchedVideo' in self._as_query['markers']:
+            return True
+        
+        # For some reason the watched text is different in playlists
+        if 'class="watchedVideoText' in self._as_query['raw']:
+            return True
+        
+        return False
+    
     @property
     def is_favorite(self) -> bool:
         '''
         Whether the video has been set as favorite by the client.
         '''
         
-        # Make sure page is loaded
-        self._token
-        
         return bool(consts.re.is_favorite(self.page, False))
+
 # EOF

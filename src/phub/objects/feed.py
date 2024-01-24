@@ -64,9 +64,21 @@ class Feed:
     
     # Mimic feed.feed to avoid repetition
     def __iter__(self) -> queries.FeedQuery:
+        
         return iter(self.feed)
     
     def sample(self, max: int = 0, filter: Callable[[FeedItem], bool] = None) -> Iterator[FeedItem]:
+        '''
+        Wraps sampling the global feed.
+        
+        Args:
+            max (int): Maximum amount of items to fetch.
+            filter (Callable): A filter function that decides whether to keep each FeedItems.
+        
+        Returns:
+            Iterator: Response iterator containing FeedItems.
+        '''
+        
         return self.feed.sample(max, filter)
 
 # EOF

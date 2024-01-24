@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from functools import cache, cached_property
-from typing import TYPE_CHECKING, Iterator, Any, Callable
+from typing import TYPE_CHECKING, Iterator, Any, Self, Callable
 
 from phub.objects import NO_PARAM, Param
 
@@ -20,28 +20,6 @@ logger = logging.getLogger(__name__)
 
 QueryItem = Video | FeedItem | User
 
-def Page(query: Query, page: list[Any]) -> Iterator[QueryItem]:
-    '''
-    Iterates over a page.
-    Args:
-        query (Query): Parent query.
-        page   (list): The parsed page to iterate over.
-    
-    Returns:
-        Iterator: An iterator containing wrapped query items.
-    '''
-    
-    for item in page:
-        wrapped: QueryItem = query._parse_item(item)
-        
-        # Yield each object of the page, but only if it does not have the spicevids
-        # markers and we explicitely suppress spicevids videos.    
-        if not(query.suppress_spicevids
-               and 'premiumIcon' in wrapped._as_query['markers']):
-            yield wrapped
-        
-        else:
-            logger.info('Bypassed spicevid video: %s', wrapped)
 
 class Query:
     '''
@@ -54,7 +32,8 @@ class Query:
                  client: Client,
                  func: str,
                  param: Param = NO_PARAM,
-                 container_hint: consts.WrappedRegex | Callable = None) -> None:
+                 container_hint: consts.WrappedRegex | Callable = None,
+                 query_repr: str = None) -> None:
         '''
         Initialise a new query.
         
@@ -63,10 +42,12 @@ class Query:
             func                (str): The URL function.
             param             (Param): Filter parameter.
             container_hint (Callable): An hint function to help determine where should the target container be.
+            query_repr          (str): Indication for the query representation.
         '''
 
         self.client = client
         self.hint = container_hint
+        self._query_repr = query_repr
         
         # Parse param
         param |= Param('page', '{page}')
@@ -85,7 +66,8 @@ class Query:
     
     def __repr__(self) -> str:
         
-        return f'phub.Query(url={self.url})'
+        s = f'"{self._query_repr}"' if self._query_repr else f'url="{self.url}"'
+        return f'phub.Query({s})'
     
     def __len__(self) -> int:
         '''
@@ -112,12 +94,13 @@ class Query:
             try:
                 page = self._get_page(i)
                 i += 1
-                yield Page(self, page)
-            
+                
+                yield self._iter_page(page)
+                
             except errors.NoResult:
                 return
     
-    def __iter__(self):
+    def __iter__(self) -> Iterator[QueryItem]:
         '''
         Iterate through the query items.
         '''
@@ -126,19 +109,33 @@ class Query:
             for item in page:
                 yield item
     
-    def sample(self, max: int = 0, filter: Callable[[QueryItem], bool] = None) -> Iterator[QueryItem]:
+    def sample(self,
+               max: int = 0,
+               filter: Callable[[QueryItem], bool] = None,
+               watched: bool | None = None,
+               free_premium: bool | None = None) -> Iterator[QueryItem]:
         '''
-        Get a sample of items.
+        Get a sample of the query.
+        
+        Args:
+            max           (int): Maximum amount of items to fetch.
+            filter   (Callable): A filter function that decides whether to keep each QueryItems.
+            watched      (bool): Whether videos should have been watched by the account or not.
+            free_premium (bool): Whether videos should be free premium or not.
+        
+        Returns:
+            Iterator: Response iterator containing QueryItems.
         '''
         
         i = 0
         for item in self:
+            # Maximum sample size
+            if max and i >= max: return
             
-            if max and i >= max:
-                return
-            
-            if filter and not filter(item):
-                continue
+            # Custom filters
+            if ((watched is not None and watched != item.watched)
+                or (free_premium is not None and free_premium != item.is_free_premium)
+                or (filter and not filter(item))): continue
             
             i += 1
             yield item
@@ -184,6 +181,14 @@ class Query:
             raise errors.NoResult()
         
         return els
+
+    def _iter_page(self, page: list[str]) -> Iterator[QueryItem]:
+        '''
+        Wraps and iterate a page items.
+        '''
+        
+        for item in page:
+            yield self._parse_item(item)
 
     # Methods defined by subclasses
     def _parse_param_set(self, key: str, set_: set) -> tuple[str, str]:
@@ -245,7 +250,7 @@ class queries:
             
             # Create the object and inject data
             video = Video(self.client, url = data['url'])
-            video.data = {f'data@{k}': v for k, v in data.items()}
+            video.data = {f'data@{k}': v for k, v in data.items()} | {'query@parent': self}
             
             return video
         
@@ -300,13 +305,16 @@ class queries:
             obj._as_query = data
             
             # Parse markers
-            markers = ' '.join(consts.re.get_markers(data['markers'])).split()
+            # markers = ' '.join(consts.re.get_markers(data['markers'])).split()
             
             obj.data = {
                 # Property overrides
                 'page@title': data["title"],
                 'data@thumb': data["image"],
-                'page@id': id
+                'page@id': id,
+                
+                # Custom query properties
+                'query@parent': self
             }
             
             return obj
@@ -314,7 +322,21 @@ class queries:
         def _parse_page(self, raw: str) -> list:
             container = (self.hint or consts.re.container)(raw)
             return consts.re.get_videos(container)
-
+    
+        def _iter_page(self, page: list[str]) -> Iterator[QueryItem]:
+            
+            for item in page:
+                wrapped: QueryItem = self._parse_item(item)
+                
+                # Yield each object of the page, but only if it does not have the spicevids
+                # markers and we explicitely suppress spicevids videos.    
+                if not(self.suppress_spicevids
+                    and 'premiumIcon' in wrapped._as_query['markers']):
+                    yield wrapped
+                
+                else:
+                    logger.info('Bypassed spicevid video: %s', wrapped)
+    
     class UserQuery(VideoQuery):
         '''
         Represents an advanced member search query.
@@ -331,6 +353,11 @@ class queries:
         def _parse_page(self, raw: str) -> list[tuple]:
             container = (self.hint or consts.re.container)(raw)
             return consts.re.get_users(container)
+        
+        def _iter_page(self, page: list[str]) -> Iterator[QueryItem]:
+        
+            for item in page:
+                yield self._parse_item(item)
 
     class FeedQuery(Query):
         '''
