@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from functools import cache, cached_property
-from typing import TYPE_CHECKING, Iterator, Any, Self, Callable
+from typing import TYPE_CHECKING, Iterator, Any, Callable
 
 from phub.objects import NO_PARAM, Param
 
