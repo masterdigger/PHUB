@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 import random
 import logging
@@ -215,16 +216,13 @@ class Video:
                  path: os.PathLike,
                  quality: Quality | str = 'best',
                  *,
-                 downloader: Callable[[Video,
-                                       Quality,
-                                       Callable[[int, int], None],
-                                       str], None] = download.default,
+                 downloader: Callable = download.default,
                  display: Callable[[int, int], None] = display.default()) -> str:
         '''
         Download the video to a file.
         
         Args:
-            path (str): The download path.
+            path (PathLike): The download path.
             quality (Quality | str | int): The video quality.
             downloader (Callable): The download backend.
             display (Callable): The progress display.
@@ -430,7 +428,7 @@ class Video:
         The video title.
         '''
         
-        return (self.data.get('page@video_title')  # Use page title if cached
+        return html.unescape(self.data.get('page@video_title')  # Use page title if cached
                 or self.fetch('data@title')) # Use HubTraffic by default
 
     @cached_property

@@ -79,18 +79,15 @@ class Client:
         self.session = requests.Session()
         self._clear_granted_token()
         
-        # Bypass age disclaimer
-        self.session.cookies.set('accessAgeDisclaimerPH', '1')
-        self.session.cookies.set('accessAgeDisclaimerUK', '1')
-        self.session.cookies.set('accessPH', '1')
-        self.session.cookies.set('age_verified', '1')
-    
+        # Insert cookies
+        self.session.cookies.update(consts.COOKIES)
+        
     def call(self,
              func: str,
              method: str = 'GET',
              data: dict = None,
              headers: dict = {},
-             timeout: float = 30,
+             timeout: float = consts.CALL_TIMEOUT,
              throw: bool = True,
              silent: bool = False) -> requests.Response:
         '''
@@ -140,6 +137,8 @@ class Client:
                 if challenge := consts.re.get_challenge(response.text, False):
                     logger.info('\n\nChallenge found, attempting to resolve\n\n')
                     parser.challenge(self, *challenge)
+                    logging.info(f"Sleeping for {consts.CHALLENGE_TIMEOUT} seconds")
+                    time.sleep(consts.CHALLENGE_TIMEOUT)
                     continue # Reload page
                 
                 break
@@ -337,21 +336,26 @@ class Client:
             query_repr = query
         )
     
-    def get_playlist(self, url: str) -> Playlist:
+    def get_playlist(self, pl: str | int | Playlist) -> Playlist:
         '''
         Initializes a Playlist object.
 
         Args:
-            url (str): The playlist url
+            pl (str | int | Playlist): The playlist url or id
 
         Returns:
             Playlist object
         '''
+        
+        assert isinstance(pl, str | int | Playlist), 'Invalid type'
+        
+        if isinstance(pl, Playlist):
+            pl = pl.url
+        
+        if isinstance(pl, str) and 'playlist' in pl:
+            pl = pl.split('/')[-1]
 
-        if isinstance(url, Playlist):
-            url = url.url
-
-        return Playlist(self, url)
+        return Playlist(self, pl)
 
     def search_user(self,
                     username: str = None,

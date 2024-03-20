@@ -59,9 +59,8 @@ def challenge(client: Client, challenge: str, token: str) -> None:
     n = utils.least_factors(p)
     
     # Build and inject cookie
-    cookie = f'{n}*{p / n}:{s}:{token}:1'
-    client.session.cookies.set('RNKEY', cookie)
+    cookie = f'{n}*{p // n}:{s}:{token}:1'
+    client.session.cookies.set('KEY', cookie)
     logger.info('Injected cookie %s', cookie)
-    
 
 # EOF
