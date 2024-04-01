@@ -18,6 +18,50 @@ logger = logging.getLogger(__name__)
 
 QueryItem = Video | FeedItem | User
 
+class Pages:
+    '''
+    An iterator for query pages.
+    '''
+
+    def __init__(self, query: Query) -> None:
+        '''
+        Initialise a new Pages object.
+        '''
+        
+        self.query = query
+    
+    def __repr__(self) -> str:
+        
+        return f'phub.Pages(query={self.query})'
+    
+    def __getitem__(self, index: int | slice) -> Iterator[QueryItem] | Iterator[Iterator[QueryItem]]:
+        '''
+        Get a single, or slice of pages.
+        '''
+        
+        if isinstance(index, int):
+            items = self.query._get_page(index)
+            return self.query._iter_page(items)
+        
+        def wrap():
+            try:
+                # Implementation of a slice range
+                i = index.start or 0
+                while not index.stop or i < index.stop:
+                    yield self[i]
+                    i += index.step or 1
+            
+            except errors.NoResult:
+                return
+        
+        return wrap()
+    
+    def __iter__(self) -> Iterator[Iterator[QueryItem]]:
+        '''
+        Iterate each page.
+        '''
+                
+        return self[:]
 
 class Query:
     '''
@@ -74,22 +118,12 @@ class Query:
         return int(counter)
 
     @cached_property
-    def pages(self) -> Iterator[Iterator[QueryItem]]:
+    def pages(self) -> Pages:
         '''
         Iterate through the query pages.
         '''
         
-        i = 0
-        while 1:
-            
-            try:
-                page = self._get_page(i)
-                i += 1
-                
-                yield self._iter_page(page)
-                
-            except errors.NoResult:
-                return
+        return Pages(self)
     
     def __iter__(self) -> Iterator[QueryItem]:
         '''

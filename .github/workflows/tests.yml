@@ -1,6 +1,13 @@
 name: PHUB API test
 
-on: [push, pull_request]
+on:
+  push:
+    paths: ['src/phub/**']
+  pull_request:
+    paths: ['src/phub/**']
+  workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * 3" # evey wednesday at 10AM
 
 jobs:
   test:

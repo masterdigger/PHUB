@@ -315,6 +315,10 @@ class Client:
             Query: Initialised query.
         '''
         
+        query = query.strip()
+        
+        assert query, 'Query must be a non-empty string'
+        
         literals.ass('production'      , production      , literals.production)
         literals.ass('category'        , category        , literals.category  )
         literals.ass('exclude_category', exclude_category, literals.category  )
