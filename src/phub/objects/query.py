@@ -80,11 +80,11 @@ class Query:
         Initialise a new query.
         
         Args:
-            client           (Client): The parent client.
-            func                (str): The URL function.
-            args               (dict): Arguments.
+            client (Client): The parent client.
+            func (str): The URL function.
+            args (dict): Arguments.
             container_hint (Callable): An hint function to help determine where should the target container be.
-            query_repr          (str): Indication for the query representation.
+            query_repr (str): Indication for the query representation.
         '''
 
         self.client = client
@@ -143,9 +143,9 @@ class Query:
         Get a sample of the query.
         
         Args:
-            max           (int): Maximum amount of items to fetch.
-            filter   (Callable): A filter function that decides whether to keep each QueryItems.
-            watched      (bool): Whether videos should have been watched by the account or not.
+            max (int): Maximum amount of items to fetch.
+            filter (Callable): A filter function that decides whether to keep each QueryItems.
+            watched (bool): Whether videos should have been watched by the account or not.
             free_premium (bool): Whether videos should be free premium or not.
         
         Returns:
@@ -293,10 +293,13 @@ class queries:
             # Evaluate video data.
             # Can be used externally from this query
             
-            keys = ('id', 'key', 'title', 'image', 'preview', 'markers')
-            data = {k: v for k, v in zip(keys, consts.re.eval_video(raw))} | {'raw': raw}
+            html_entries = consts.re.eval_video(raw)
+            html_public_entries = consts.re.eval_public_video(raw, False) or ()
             
-            return data
+            data =        {k: v for v, k in zip(html_entries, ('id', 'key', 'title', 'image'))}
+            public_data = {k: v for v, k in zip(html_public_entries, ('preview', 'markers'))}
+            
+            return {'mediabook': None, 'markers': ''} | data | public_data | {'raw': raw}
         
         def _parse_item(self, raw: str) -> Video:
             
@@ -316,7 +319,8 @@ class queries:
                 'page@id': id,
                 
                 # Custom query properties
-                'query@parent': self
+                'query@parent': self,
+                'query@watched': 'videos/recent' in self.url
             }
             
             return obj

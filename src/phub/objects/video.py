@@ -36,7 +36,7 @@ class Video:
         
         Args:
             client (Client): The parent client.
-            url       (str): The video URL.
+            url (str): The video URL.
         '''
         
         if not consts.re.is_video_url(url):
@@ -444,7 +444,7 @@ class Video:
         
         else:
             url = self.fetch('data@thumb')
-            servers = self.fetch('data@thumbs')
+            servers = self.data.get('data@thumbs') or [] # TODO - Use cache on prop Image.servers
         
         return Image(client = self.client,
                      url = url,
@@ -621,16 +621,17 @@ class Video:
         
         assert self.client.logged, 'Client must be logged in to use this property'
         
-        # If we fetched the video page while logged in, PH consider we have watched it
-        if self.page:
+        # Use query sortcut if possible
+        if self.data.get('query@watched'):
             return True
         
-        if 'watchedVideo' in self._as_query['markers']:
-            return True
-        
-        # For some reason the watched text is different in playlists
+        # Search in markers
         if 'class="watchedVideoText' in self._as_query['raw']:
             return True
+        
+        # Evaluate on page (TODO)
+        if self.page:
+            ...
         
         return False
     
