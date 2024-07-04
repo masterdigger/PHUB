@@ -10,7 +10,7 @@ method.
 .. code-block:: python
 
     import phub
-    from phub.locals import Quality
+    from phub.literals import Quality
 
     video = ...
 
