@@ -100,7 +100,7 @@ it or the API.
     import logging
 
     # Use whatever configuration you want
-    logging.BasicConfig(level = logging.INFO)
+    logging.basicConfig(level = logging.INFO)
 
     client = phub.Client()
     ...
