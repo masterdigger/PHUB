@@ -14,17 +14,17 @@ PHUB uses the following dependencies:
 .. _click: https://pypi.org/project/click/
 .. _ffmpeg-progress-yield: https://pypi.org/project/ffmpeg-progress-yield/
 
-- Installing the lastest stable release (python 3.9 or higher):
+- Install using ``pip`` (python ``3.9`` or higher required):
 
 .. code-block:: bash
 
     pip install --upgrade phub
 
-- Installing the latest unstable updates (python 3.9 or higher):
+- Or from this repo to get the latest fixes/features:
 
 .. code-block:: bash
 
-    pip install --upgrade git+https://github.com/Egsagon/PHUB.git
+    pip install --upgrade git+https://github.com/EchterAlsFake/PHUB.git
 
 You can use PHUB as a :doc:`CLI </guides/cli-usage>`,
 a :doc:`GUI </guides/gui-usage>` or a :doc:`Python package </guides/pkg-usage>`. 
